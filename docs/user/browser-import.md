@@ -24,5 +24,5 @@ are skipped on all platforms.
 Some sites show an "unsupported browser" page because the preview identifies itself as Electron.
 Add a profile, open its **⋯** menu, and set **User-Agent** to **Chrome**, or **Custom…** to enter
 your own. Reload open tabs of that profile to apply it. The Default and Incognito profiles always
-keep the native identity, because some sign-in checks such as Cloudflare Turnstile fail with a
-rewritten one. If a site already sent you to its unsupported page, open the site's home page again.
+keep the native identity, because some bot checks such as Cloudflare Turnstile fail with a
+rewritten one. Use a dedicated profile only for the sites that need it. If a site already sent you to its unsupported page, open the site's home page again.
