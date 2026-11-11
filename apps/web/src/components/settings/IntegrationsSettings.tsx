@@ -9,6 +9,10 @@ import {
   BROWSER_PROFILE_MAX_COUNT,
   type BrowserLinkTarget,
   type BrowserProfile,
+  BrowserProfileCustomUserAgent,
+  BrowserProfileUserAgentMode,
+  BROWSER_PROFILE_USER_AGENT_MAX_LENGTH,
+  chromeUserAgentFor,
   BrowserSearchEngine,
   BROWSER_CUSTOM_SEARCH_URL_MAX_LENGTH,
   type EnvironmentId,
@@ -69,7 +73,13 @@ import {
   MenuGroupLabel,
   MenuItem,
   MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuRadioItemIndicator,
   MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
 import { readLocalApi } from "~/localApi";
@@ -1107,6 +1117,20 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
   );
 }
 
+const isBrowserProfileCustomUserAgent = Schema.is(BrowserProfileCustomUserAgent);
+
+const USER_AGENT_MODE_LABELS: Record<BrowserProfileUserAgentMode, string> = {
+  native: "Native (default)",
+  chrome: "Chrome",
+  custom: "Custom…",
+};
+
+const USER_AGENT_MODE_BADGES: Record<BrowserProfileUserAgentMode, string> = {
+  native: "Native UA",
+  chrome: "Chrome UA",
+  custom: "Custom UA",
+};
+
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
@@ -1184,6 +1208,38 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         profile.id === id ? { ...profile, name } : profile,
       ),
     });
+  };
+
+  const updateProfileUserAgent = (
+    id: string,
+    userAgentMode: BrowserProfileUserAgentMode,
+    customUserAgent?: string,
+  ) => {
+    if (!settingsHydrated || importInFlightRef.current) return;
+    updateSettings({
+      browserProfiles: getClientSettings().browserProfiles.map((profile) => {
+        if (profile.id !== id) return profile;
+        const { customUserAgent: previous, ...rest } = profile;
+        const nextCustom = customUserAgent ?? previous;
+        return nextCustom === undefined
+          ? { ...rest, userAgentMode }
+          : { ...rest, userAgentMode, customUserAgent: nextCustom };
+      }),
+    });
+  };
+
+  const commitCustomUserAgent = (profile: BrowserProfile, next: string) => {
+    const value = next.trim();
+    if (value === profile.customUserAgent) return;
+    if (!isBrowserProfileCustomUserAgent(value)) {
+      toastManager.add({
+        type: "error",
+        title: "Invalid User-Agent",
+        description: `Use printable ASCII characters, up to ${BROWSER_PROFILE_USER_AGENT_MAX_LENGTH}.`,
+      });
+      return;
+    }
+    updateProfileUserAgent(profile.id, "custom", value);
   };
 
   const clearProfileData = (id: string, name: string) => {
@@ -1368,99 +1424,155 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         {listedProfiles.map((profile, index) => {
           const builtIn = isBuiltInBrowserProfileId(profile.id);
           const isDefault = profile.id === resolvedDefaultId;
+          // Only the desktop preview honors overrides; built-ins stay native for Cloudflare Turnstile.
+          const userAgentEditable = !builtIn && previewBridge !== null;
+          const userAgentMode = profile.userAgentMode ?? "native";
           return (
             <div
               key={profile.id}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2",
-                index > 0 && "border-t border-border/60",
-              )}
+              className={cn("px-3 py-2", index > 0 && "border-t border-border/60")}
             >
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                {builtIn ? (
-                  <span
-                    className={cn(
-                      "truncate text-sm text-foreground",
-                      profileWritesDisabled && "opacity-64",
-                    )}
-                  >
-                    {profile.name}
-                  </span>
-                ) : (
-                  <DraftInput
-                    nativeInput
-                    size="sm"
-                    className="w-full max-w-56"
-                    aria-label={`Rename ${profile.name}`}
-                    disabled={profileWritesDisabled || importInFlight}
-                    maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
-                    value={profile.name}
-                    onCommit={(next) => renameProfile(profile.id, next)}
-                  />
-                )}
-                {isDefault ? (
-                  <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <Badge>Default</Badge>
-                  </span>
-                ) : null}
-              </span>
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
+              <div className="flex items-center gap-3">
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                  {builtIn ? (
+                    <span
+                      className={cn(
+                        "truncate text-sm text-foreground",
+                        profileWritesDisabled && "opacity-64",
+                      )}
+                    >
+                      {profile.name}
+                    </span>
+                  ) : (
+                    <DraftInput
+                      nativeInput
+                      size="sm"
+                      className="w-full max-w-56"
+                      aria-label={`Rename ${profile.name}`}
                       disabled={profileWritesDisabled || importInFlight}
-                      aria-label={`${profile.name} options`}
+                      maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
+                      value={profile.name}
+                      onCommit={(next) => renameProfile(profile.id, next)}
                     />
-                  }
-                >
-                  <MoreVertical />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  <MenuItem
-                    disabled={!settingsHydrated || isDefault}
-                    onClick={() => {
-                      if (settingsHydrated) {
-                        updateSettings({ browserDefaultProfileId: profile.id });
-                      }
-                    }}
+                  )}
+                  {isDefault ? (
+                    <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
+                      <Badge>Default</Badge>
+                    </span>
+                  ) : null}
+                  {userAgentEditable && userAgentMode !== "native" ? (
+                    <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
+                      <Badge variant="outline">{USER_AGENT_MODE_BADGES[userAgentMode]}</Badge>
+                    </span>
+                  ) : null}
+                </span>
+                <Menu>
+                  <MenuTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost-muted"
+                        disabled={profileWritesDisabled || importInFlight}
+                        aria-label={`${profile.name} options`}
+                      />
+                    }
                   >
-                    Set as default
-                  </MenuItem>
-                  <MenuItem
-                    disabled={!settingsHydrated || !removalAvailable}
-                    onClick={() => {
-                      if (serverProfileData.environmentIds.length > 0) {
-                        setProfilePendingClear(profile);
-                      } else clearProfileData(profile.id, profile.name);
-                    }}
-                  >
-                    Clear cookies and cache
-                  </MenuItem>
-                  {builtIn ? null : (
+                    <MoreVertical />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
+                    {userAgentEditable ? (
+                      <MenuSub>
+                        <MenuSubTrigger>User-Agent</MenuSubTrigger>
+                        <MenuSubPopup>
+                          <MenuGroup>
+                            <MenuGroupLabel>Reload open tabs to apply</MenuGroupLabel>
+                            <MenuRadioGroup
+                              value={userAgentMode}
+                              onValueChange={(value) => {
+                                const mode = BrowserProfileUserAgentMode.literals.find(
+                                  (literal) => literal === value,
+                                );
+                                if (mode === undefined) return;
+                                updateProfileUserAgent(
+                                  profile.id,
+                                  mode,
+                                  mode === "custom" && profile.customUserAgent === undefined
+                                    ? chromeUserAgentFor(navigator.userAgent)
+                                    : undefined,
+                                );
+                              }}
+                            >
+                              {BrowserProfileUserAgentMode.literals.map((mode) => (
+                                <MenuRadioItem key={mode} value={mode}>
+                                  <span className="flex items-center gap-2">
+                                    <span className="flex-1">{USER_AGENT_MODE_LABELS[mode]}</span>
+                                    <MenuRadioItemIndicator />
+                                  </span>
+                                </MenuRadioItem>
+                              ))}
+                            </MenuRadioGroup>
+                          </MenuGroup>
+                        </MenuSubPopup>
+                      </MenuSub>
+                    ) : null}
                     <MenuItem
-                      variant="destructive"
-                      disabled={!settingsHydrated || !removalAvailable}
+                      disabled={!settingsHydrated || isDefault}
                       onClick={() => {
-                        if (settingsHydrated) setProfilePendingRemoval(profile);
+                        if (settingsHydrated) {
+                          updateSettings({ browserDefaultProfileId: profile.id });
+                        }
                       }}
                     >
-                      Remove profile and data
+                      Set as default
                     </MenuItem>
-                  )}
-                  {!removalAvailable ? (
-                    <>
-                      <MenuSeparator />
-                      <MenuItem disabled>
-                        {environmentsReady
-                          ? "Connect to an environment to clear profile data"
-                          : "Checking environments…"}
+                    <MenuItem
+                      disabled={!settingsHydrated || !removalAvailable}
+                      onClick={() => {
+                        if (serverProfileData.environmentIds.length > 0) {
+                          setProfilePendingClear(profile);
+                        } else clearProfileData(profile.id, profile.name);
+                      }}
+                    >
+                      Clear cookies and cache
+                    </MenuItem>
+                    {builtIn ? null : (
+                      <MenuItem
+                        variant="destructive"
+                        disabled={!settingsHydrated || !removalAvailable}
+                        onClick={() => {
+                          if (settingsHydrated) setProfilePendingRemoval(profile);
+                        }}
+                      >
+                        Remove profile and data
                       </MenuItem>
-                    </>
-                  ) : null}
-                </MenuPopup>
-              </Menu>
+                    )}
+                    {!removalAvailable ? (
+                      <>
+                        <MenuSeparator />
+                        <MenuItem disabled>
+                          {environmentsReady
+                            ? "Connect to an environment to clear profile data"
+                            : "Checking environments…"}
+                        </MenuItem>
+                      </>
+                    ) : null}
+                  </MenuPopup>
+                </Menu>
+              </div>
+              {userAgentEditable && userAgentMode === "custom" ? (
+                <DraftInput
+                  nativeInput
+                  size="sm"
+                  className="mt-2 w-full"
+                  aria-label={`${profile.name} User-Agent`}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  disabled={profileWritesDisabled || importInFlight}
+                  maxLength={BROWSER_PROFILE_USER_AGENT_MAX_LENGTH}
+                  value={profile.customUserAgent ?? ""}
+                  onCommit={(next) => commitCustomUserAgent(profile, next)}
+                />
+              ) : null}
             </div>
           );
         })}

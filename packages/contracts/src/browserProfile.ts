@@ -18,10 +18,24 @@ export const BrowserProfileName = TrimmedNonEmptyString.check(
 export const BrowserProfileKind = Schema.Literals(["persistent", "incognito"]);
 export type BrowserProfileKind = typeof BrowserProfileKind.Type;
 
+export const BROWSER_PROFILE_USER_AGENT_MAX_LENGTH = 512;
+
+/** "chrome" derives a Chrome identity from the running engine; "custom" sends `customUserAgent`. */
+export const BrowserProfileUserAgentMode = Schema.Literals(["native", "chrome", "custom"]);
+export type BrowserProfileUserAgentMode = typeof BrowserProfileUserAgentMode.Type;
+
+/** Header values must stay printable ASCII; Chromium rejects anything else. */
+export const BrowserProfileCustomUserAgent = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(BROWSER_PROFILE_USER_AGENT_MAX_LENGTH),
+  Schema.isPattern(/^[\x20-\x7E]+$/),
+);
+
 export const BrowserProfile = Schema.Struct({
   id: BrowserProfileId,
   name: BrowserProfileName,
   kind: BrowserProfileKind,
+  userAgentMode: Schema.optionalKey(BrowserProfileUserAgentMode),
+  customUserAgent: Schema.optionalKey(BrowserProfileCustomUserAgent),
 });
 export type BrowserProfile = typeof BrowserProfile.Type;
 
@@ -56,4 +70,37 @@ export function findBrowserProfile(
   id: string | undefined,
 ): BrowserProfile | undefined {
   return id === undefined ? undefined : profiles.find((profile) => profile.id === id);
+}
+
+/**
+ * Chrome's reduced User-Agent for the running engine: app and Electron tokens removed, version
+ * reduced to `<major>.0.0.0`. The platform token is already Chrome's frozen one.
+ */
+export function chromeUserAgentFor(nativeUserAgent: string): string {
+  return nativeUserAgent
+    .replace(/( \(KHTML, like Gecko\)) .*?( Chrome\/)/, "$1$2")
+    .replace(/ Electron\/\S+/, "")
+    .replace(/ Chrome\/(\d+)[\d.]*/, " Chrome/$1.0.0.0");
+}
+
+/**
+ * The User-Agent a profile's guests should use, or undefined to keep Electron's native one.
+ * Built-in profiles never override: a rewritten identity breaks Cloudflare Turnstile.
+ * An explicit "native" returns the exact native string so a live guest can switch back.
+ */
+export function browserProfileUserAgent(
+  nativeUserAgent: string,
+  profile: BrowserProfile | undefined,
+): string | undefined {
+  if (profile === undefined || isBuiltInBrowserProfileId(profile.id)) return undefined;
+  switch (profile.userAgentMode) {
+    case undefined:
+      return undefined;
+    case "native":
+      return nativeUserAgent;
+    case "chrome":
+      return chromeUserAgentFor(nativeUserAgent);
+    case "custom":
+      return profile.customUserAgent ?? nativeUserAgent;
+  }
 }

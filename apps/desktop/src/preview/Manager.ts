@@ -1486,6 +1486,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     };
     // Popups inherit Electron's unrestricted window handler; block nested popups to bound the chain.
     const windowCreated = (window: Electron.BrowserWindow): void => {
+      // Popups (sign-in flows) start with the session default, not the opener's profile override.
+      const userAgent = wc.getUserAgent();
+      if (window.webContents.getUserAgent() !== userAgent) {
+        window.webContents.setUserAgent(userAgent);
+      }
       window.webContents.setIgnoreMenuShortcuts(true);
       window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       window.webContents.on("before-input-event", (_event, input) => {

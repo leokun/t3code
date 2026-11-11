@@ -1,14 +1,16 @@
-import type {
-  DesktopPreviewColorScheme,
-  PreviewViewportSetting,
-  ScopedThreadRef,
+import {
+  browserProfileUserAgent,
+  findBrowserProfile,
+  type DesktopPreviewColorScheme,
+  type PreviewViewportSetting,
+  type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { useShallow } from "zustand/react/shallow";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
-import { useClientSettingsHydrated } from "~/hooks/useSettings";
+import { useClientSettings, useClientSettingsHydrated } from "~/hooks/useSettings";
 import { cn, isMacPlatform } from "~/lib/utils";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
@@ -38,6 +40,7 @@ interface ElectronWebview extends HTMLElement {
   webpreferences?: string;
   getWebContentsId: () => number;
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
+  setUserAgent: (userAgent: string) => void;
 }
 
 declare global {
@@ -75,6 +78,12 @@ export function HostedBrowserWebview(props: {
     serverRendering,
   } = props;
   const clientSettingsHydrated = useClientSettingsHydrated();
+  const userAgent = useClientSettings((settings) =>
+    browserProfileUserAgent(
+      navigator.userAgent,
+      findBrowserProfile(settings.browserProfiles, profileId),
+    ),
+  );
   const config = usePreviewWebviewConfig(threadRef.environmentId, profileId);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
@@ -146,6 +155,16 @@ export function HostedBrowserWebview(props: {
   const setWebviewRef = (node: HTMLElement | null) => {
     webviewRef.current = node as ElectronWebview | null;
   };
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pushes a profile User-Agent change into an attached guest; the next load uses it
+  useEffect(() => {
+    if (userAgent === undefined) return;
+    try {
+      webviewRef.current?.setUserAgent(userAgent);
+    } catch {
+      // Not attached yet; the useragent attribute applies at attach.
+    }
+  }, [userAgent]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the webview's webContents with the desktop bridge and listens for crashes and focus
   useEffect(() => {
@@ -340,6 +359,8 @@ export function HostedBrowserWebview(props: {
           {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
           src={webviewGeneration === 0 ? initialSrc : recoverySrc}
           partition={config.partition}
+          // Applied at attach and on change; pages already loaded keep the old identity until reload.
+          {...(userAgent ? { useragent: userAgent } : {})}
           webpreferences={config.webPreferences}
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
           data-preview-tab={runtimeTabId}
